@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: dev
+    schema: dev
+    tables:
+      - name: raw_weather_data
+        description: "Raw weather data inserted by the Airflow pipeline from Weatherstack API"
+        columns:
+          - name: id
+            description: "Primary key"
+          - name: city
+            description: "City name"
+          - name: temperature
+            description: "Temperature in Celsius"
+          - name: weather_descriptions
+            description: "Weather condition description"
+          - name: wind_speed
+            description: "Wind speed"
+          - name: time
+            description: "Local time at location"
+          - name: inserted_at
+            description: "Timestamp when row was inserted"
+          - name: utc_offset
+            description: "UTC offset of the location"

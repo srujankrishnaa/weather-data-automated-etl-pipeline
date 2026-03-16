@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Environment / secrets
+docker/.env
+
+# PostgreSQL data dir (large, machine-specific)
+postgres/data/
+
+# Superset source code (cloned separately, not needed)
+superset/
+superset-core/
+
+# Airflow runtime
+airflow/logs/
+airflow/plugins/
+
+# dbt artifacts
+dbt/target/
+dbt/dbt_packages/
+dbt/.user.yml
+
+# OS
+.DS_Store
+Thumbs.db
