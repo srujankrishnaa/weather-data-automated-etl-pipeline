@@ -1,6 +1,20 @@
 # 🌦️ Automated Weather Data ETL Pipeline
 
-An end-to-end, fully automated data pipeline that ingests live weather data every 5 minutes, transforms it with dbt, and serves auto-refreshing dashboards via Apache Superset — everything containerised with Docker.
+An end-to-end, fully automated data pipeline that ingests live weather 
+data from the Weatherstack API every 5 minutes, loads it into PostgreSQL, 
+transforms it with dbt, and visualises it via Apache Superset dashboards — all orchestrated by Apache Airflow and containerised with Docker Compose.
+
+Built to demonstrate real-world data engineering practices including 
+pipeline orchestration, data modelling, containerisation, and BI reporting 
+in a single deployable project.
+
+![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python&logoColor=white)
+![Airflow](https://img.shields.io/badge/Airflow-3.0.0-017CEE?logo=apacheairflow&logoColor=white)
+![dbt](https://img.shields.io/badge/dbt-1.9-FF694B?logo=dbt&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14.17-336791?logo=postgresql&logoColor=white)
+![Superset](https://img.shields.io/badge/Superset-3.0.0-20A6C9?logo=apache&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
@@ -36,14 +50,16 @@ An end-to-end, fully automated data pipeline that ingests live weather data ever
 ## 📁 Project Structure
 
 ```
-data_project/
+weather-data-automated-etl-pipeline/
 ├── docker-compose.yaml          # Defines all 6 services
 ├── .gitignore
+├── project_documentation.md    # Full user manual (detailed)
 ├── images/                      # Screenshots used in this README
 │
 ├── api_call/
 │   ├── request_call.py          # Calls the Weatherstack API
-│   └── insert_records.py        # Inserts data into Postgres
+│   ├── insert_records.py        # Inserts data into Postgres
+│   └── requirements.txt         # Python dependencies
 │
 ├── airflow/
 │   └── dags/
@@ -76,9 +92,15 @@ data_project/
 ## 🚀 How to Run Locally
 
 ### Prerequisites
-- Windows with **WSL2** (Ubuntu 24.04 recommended)
-- **Docker Desktop** installed and WSL2 integration enabled
-- A free **Weatherstack API key** → [weatherstack.com](https://weatherstack.com)
+
+| Requirement | Details |
+|---|---|
+| **OS** | Windows 10/11 with WSL2, or Linux (Ubuntu 24.04 recommended) |
+| **RAM** | 8 GB minimum — 12 GB+ recommended |
+| **Docker Desktop** | Version 4.x+ with WSL2 backend enabled |
+| **Git** | For cloning the repository |
+| **Weatherstack API Key** | Free tier at [weatherstack.com](https://weatherstack.com) (100 calls/month) |
+| **Disk Space** | ~4 GB for Docker images |
 
 ---
 
