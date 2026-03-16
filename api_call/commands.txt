@@ -1,6 +1,0 @@
- newgrp docker
- docker-compose exec db psql -U db_user -d db
-
- \dt dev.*
-
- docker exec airflow_container cat /opt/airflow/simple_auth_manager_passwords.json.generated

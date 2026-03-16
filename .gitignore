@@ -6,6 +6,15 @@ __pycache__/
 venv/
 *.egg-info/
 
+# Personal reference files
+api_call/commands.txt
+
+# dbt logs and artifacts
+dbt/logs/
+dbt/target/
+dbt/dbt_packages/
+dbt/.user.yml
+
 # Environment / secrets
 docker/.env
 

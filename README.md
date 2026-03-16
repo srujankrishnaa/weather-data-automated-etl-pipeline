@@ -275,7 +275,7 @@ Use `down` (without `-v`) for normal restarts.
 
 ## 📋 User Manual
 
-For a detailed step-by-step user manual covering every configuration option, advanced dbt model descriptions, Airflow task deep-dives, and Superset chart building, see [`project_documentation.md`](docs/project_documentation.md).
+For a detailed step-by-step user manual covering every configuration option, advanced dbt model descriptions, Airflow task deep-dives, and Superset chart building, see [**project_documentation.md**](project_documentation.md).
 
 ---
 
