@@ -1,7 +1,7 @@
 # 🌦️ Automated Weather Data ETL Pipeline
 
 An end-to-end, Containerized data pipeline that simulates real-time ingestion of weather data at 5-minute intervals using 
-Apache Airflow scheduling, loads it into PostgreSQL, transforms it with dbt, and visualises it via Apache Superset dashboards.
+Apache Airflow scheduling, loads it into PostgreSQL, transforms and models data using dbt and visualises it via Apache Superset dashboards.
 
 Built to demonstrate real-world data engineering practices including 
 pipeline orchestration, data modelling, containerisation, and BI reporting 
