@@ -68,6 +68,8 @@ Weatherstack API
 
 ### Enable WSL2 on Windows
 
+**Option A — PowerShell (classic method)**
+
 Open **PowerShell as Administrator** and run:
 
 ```powershell
@@ -82,6 +84,21 @@ wsl --install -d Ubuntu-24.04
 ```
 
 Restart your computer when prompted. After restart, open **Ubuntu** from the Start menu. It will ask you to create a UNIX username and password — remember these, you'll need them for `sudo`.
+
+---
+
+**Option B — VS Code (recommended if you already use VS Code)**
+
+This is the method used when building this project:
+
+1. Install the **Remote Development** extension pack in VS Code
+2. Click the **blue `><` icon** in the bottom-left corner of VS Code
+3. Select **"Connect to WSL with Distro..."**
+4. Choose **Ubuntu-24.04** (it will install it automatically if not present)
+5. VS Code reconnects and you're now inside Linux — open the integrated terminal and you're ready
+
+> [!TIP]
+> The VS Code method gives you full IDE features (file explorer, extensions, Git integration) running natively inside WSL2, which is the best development experience for this project.
 
 ### Verify WSL2 is Running
 
