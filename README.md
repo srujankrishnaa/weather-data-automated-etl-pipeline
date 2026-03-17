@@ -1,8 +1,7 @@
 # 🌦️ Automated Weather Data ETL Pipeline
 
-An end-to-end, fully automated data pipeline that ingests live weather 
-data from the Weatherstack API every 5 minutes, loads it into PostgreSQL, 
-transforms it with dbt, and visualises it via Apache Superset dashboards — all orchestrated by Apache Airflow and containerised with Docker Compose.
+An end-to-end, Containerized data pipeline that simulates real-time ingestion of weather data at 5-minute intervals using 
+Apache Airflow scheduling, loads it into PostgreSQL, transforms it with dbt, and visualises it via Apache Superset dashboards.
 
 Built to demonstrate real-world data engineering practices including 
 pipeline orchestration, data modelling, containerisation, and BI reporting 
@@ -219,7 +218,7 @@ Both tasks completing successfully in each run:
 
 ![Airflow DAG Tasks Success](images/airflow_dag_success2.png)
 
-### Superset — Live Auto-Refreshing Dashboard
+### Superset — provides interactive dashboards
 
 Weather metrics (avg temperature + wind speed) updating in real time:
 
