@@ -9,7 +9,7 @@
 6. [Start the Pipeline](#6-start-the-pipeline)
 7. [Verifying PostgreSQL Data](#7-verifying-postgresql-data)
 8. [Airflow — DAG Overview & Monitoring](#8-airflow--dag-overview--monitoring)
-9. [dbt — Transformations Explained](#9-dbt--transformations-explained)
+9. [dbt — Transformations & Data Quality](#9-dbt--transformations--data-quality)
 10. [Superset — Connecting & Building Dashboards](#10-superset--connecting--building-dashboards)
 11. [Troubleshooting Guide](#11-troubleshooting-guide)
 12. [Useful Commands Reference](#12-useful-commands-reference)
@@ -32,17 +32,22 @@ Everything runs in Docker containers, spun up with a single `docker-compose up` 
 Weatherstack API
     │  (every 5 min, triggered by Airflow)
     ▼
-ingest_data_task  →  dev.raw_weather_data  (Postgres)
+① ingest_data_task  →  dev.raw_weather_data  (Postgres)
     │
     ▼
-transform_data_task (dbt run)
-    ├──  dev.stg_weather_data          (deduplicated)
-    ├──  dev.daily_average             (aggregated)
-    └──  dev.weather_analytics_reports (reporting)
-             │
-             ▼
-      Apache Superset Dashboard
-      (auto-refresh every 5 min)
+② transform_data_task (dbt run)
+    │  Null coalescing + deduplication + data_quality_flag
+    ├──  dev.stg_weather_data          (cleaned + deduplicated)
+    ├──  dev.daily_average             (aggregated per city/day)
+    └──  dev.weather_analytics_reports (reporting layer)
+    │
+    ▼
+③ validate_data_task (dbt test)
+    │  26 tests: not_null, unique, accepted_values
+    │  ✅ PASS=26 / WARN=0 / ERROR=0
+    ▼
+  Apache Superset Dashboard
+  (auto-refresh every 5 min)
 ```
 
 **Tech Stack:**
@@ -242,8 +247,14 @@ Useful queries:
 -- See raw ingested data (most recent first)
 SELECT * FROM dev.raw_weather_data ORDER BY inserted_at DESC LIMIT 10;
 
--- See deduplicated staging data
+-- See deduplicated staging data with data quality flags
 SELECT * FROM dev.stg_weather_data LIMIT 10;
+
+-- Check how many rows had nulls fixed vs clean
+SELECT data_quality_flag, COUNT(*) as count
+FROM dev.stg_weather_data
+GROUP BY data_quality_flag
+ORDER BY count DESC;
 
 -- See daily aggregated averages per city
 SELECT * FROM dev.daily_average;
@@ -263,7 +274,7 @@ SELECT * FROM dev.weather_analytics_reports;
 
 File: `airflow/dags/orchestrator.py`
 
-The DAG has two tasks chained sequentially (`task1 >> task2`):
+The DAG has **three tasks** chained sequentially (`task1 >> task2 >> task3`):
 
 1. **`ingest_data_task`** (`PythonOperator`)
    - Lazily imports `insert_records.main()` inside the callable (avoids parse-time imports)
@@ -273,8 +284,14 @@ The DAG has two tasks chained sequentially (`task1 >> task2`):
 2. **`transform_data_task`** (`BashOperator`)
    - Runs `docker run ... ghcr.io/dbt-labs/dbt-postgres:1.9.latest run`
    - Mounts the local `./dbt` directory into the container
-   - Executes all dbt models: staging → mart
+   - Applies null coalescing, deduplication, and builds all 3 dbt models
    - Runs in ~10–15 seconds
+
+3. **`validate_data_task`** (`BashOperator`)
+   - Runs `docker run ... ghcr.io/dbt-labs/dbt-postgres:1.9.latest test`
+   - Executes all 26 dbt schema tests across source, staging, and mart layers
+   - Fails the DAG run visibly if any data quality check fails
+   - Runs in ~3–5 seconds
 
 Schedule: every **5 minutes** (`schedule=timedelta(minutes=5)`)
 
@@ -283,7 +300,7 @@ Schedule: every **5 minutes** (`schedule=timedelta(minutes=5)`)
 1. Go to **http://localhost:8000** → login
 2. **Dags** list → find `weather-api-dbt-orchestrator` — toggle should be ON (blue)
 3. Click the DAG → **Runs** tab → each row is one 5-min execution
-4. Click a run → **Task Instances** → both tasks show ✅ **success** when working
+4. Click a run → **Task Instances** → all three tasks show ✅ **success** when working
 
 ### Manual Trigger
 
@@ -301,45 +318,84 @@ docker logs airflow_container 2>&1 | grep "dags-folder  orchestrator"
 
 ---
 
-## 9. dbt — Transformations Explained
+## 9. dbt — Transformations & Data Quality
 
 ### Models Overview
 
 ```
 dbt/models/
 ├── staging/
-│   ├── sources.yml             → Registers dev.raw_weather_data as a dbt source
-│   └── stg_weather_data.sql   → Reads raw data, deduplicates using ROW_NUMBER()
+│   ├── sources.yml         → Registers source + not_null/unique tests on raw_weather_data
+│   ├── schema.yml          → Column-level tests for stg_weather_data
+│   └── stg_weather_data.sql → Null handling, deduplication → staging table
 └── mart/
-    ├── daily_average.sql             → AVG(temperature), AVG(wind_speed) per city/day
-    └── weather_analytics_reports.sql → Key columns for reporting (city, temp, wind, time)
+    ├── schema.yml                        → Column-level tests for mart models
+    ├── daily_average.sql                 → AVG(temperature), AVG(wind_speed) per city/day
+    └── weather_analytics_reports.sql     → Key columns for reporting
 ```
 
-### Deduplication Logic (`stg_weather_data.sql`)
+### Null & Missing Value Handling (`stg_weather_data.sql`)
+
+Before deduplication, all nullable columns are coalesced to safe defaults:
+
+| Column | Strategy |
+|---|---|
+| `city` | `COALESCE(NULLIF(TRIM(city), ''), 'Unknown')` |
+| `temperature` | `COALESCE(temperature, 0)` |
+| `wind_speed` | `COALESCE(wind_speed, 0)` |
+| `weather_descriptions` | `COALESCE(NULLIF(TRIM(...), ''), 'N/A')` |
+| `time` | `COALESCE(time::text, to_char(inserted_at, 'YYYY-MM-DD HH24:MI'))` |
+
+Every row is tagged with a `data_quality_flag` column:
+- `'clean'` — no nulls were found
+- `'fixed: city null'`, `'fixed: temperature null'` etc. — describes what was fixed
+
+This lets you monitor data quality trends over time directly in Superset.
+
+### Deduplication Logic
+
+After cleaning, rows are deduplicated using `ROW_NUMBER()` — keeping only the latest record per `time` window:
 
 ```sql
-WITH source AS (
-    SELECT * FROM {{ source('dev', 'raw_weather_data') }}
-),
 de_dup AS (
     SELECT *,
-        ROW_NUMBER() OVER (PARTITION BY weather_local_time ORDER BY inserted_at DESC) AS rn
-    FROM source
+        ROW_NUMBER() OVER (PARTITION BY time ORDER BY inserted_at DESC) AS rn
+    FROM cleaned
 )
-SELECT * FROM de_dup WHERE rn = 1
+SELECT ... FROM de_dup WHERE rn = 1
 ```
+
+### Data Quality Tests (26 total — defined in schema.yml files)
+
+| Layer | File | Tests |
+|---|---|---|
+| Source | `staging/sources.yml` | `not_null` on 6 columns, `unique` on `id` |
+| Staging | `staging/schema.yml` | `not_null` on all columns, `unique` on `id`, `accepted_values` on `data_quality_flag` |
+| Mart | `mart/schema.yml` | `not_null` on all columns of `daily_average` + `weather_analytics_reports` |
+
+Tests run automatically after every `dbt run` via `validate_data_task` in Airflow.
 
 ### Run dbt Manually
 
 ```bash
 # Run all models
-docker exec dbt_container dbt run
+docker run --rm --network data_project_my_network \
+  -v /home/srujan/repos/data_project/dbt:/usr/app -w /usr/app \
+  -e DBT_PROFILES_DIR=/usr/app \
+  ghcr.io/dbt-labs/dbt-postgres:1.9.latest run
 
-# Full refresh (drops and recreates tables)
-docker exec dbt_container dbt run --full-refresh
+# Full refresh (drops + recreates all tables)
+docker run --rm --network data_project_my_network \
+  -v /home/srujan/repos/data_project/dbt:/usr/app -w /usr/app \
+  -e DBT_PROFILES_DIR=/usr/app \
+  ghcr.io/dbt-labs/dbt-postgres:1.9.latest run --full-refresh
 
-# Test models
-docker exec dbt_container dbt test
+# Run data quality tests
+docker run --rm --network data_project_my_network \
+  -v /home/srujan/repos/data_project/dbt:/usr/app -w /usr/app \
+  -e DBT_PROFILES_DIR=/usr/app \
+  ghcr.io/dbt-labs/dbt-postgres:1.9.latest test
+# Expected: PASS=26 WARN=0 ERROR=0
 ```
 
 ---
