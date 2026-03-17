@@ -16,10 +16,19 @@ default_args = {
     'retry_delay': timedelta(minutes=2),
 }
 
+DBT_CMD = (
+    'docker run --rm '
+    '--network data_project_my_network '
+    '-v /home/srujan/repos/data_project/dbt:/usr/app '
+    '-w /usr/app '
+    '-e DBT_PROFILES_DIR=/usr/app '
+    'ghcr.io/dbt-labs/dbt-postgres:1.9.latest '
+)
+
 dag = DAG(
     dag_id='weather-api-dbt-orchestrator',
     default_args=default_args,
-    description='A DAG to orchestrate data ingestion and dbt',
+    description='Ingest weather data, transform with dbt, validate data quality',
     start_date=datetime(2024, 4, 30),
     schedule=timedelta(minutes=5),
     catchup=False,
@@ -34,14 +43,12 @@ with dag:
 
     task2 = BashOperator(
         task_id='transform_data_task',
-        bash_command=(
-            'docker run --rm '
-            '--network data_project_my_network '
-            '-v /home/srujan/repos/data_project/dbt:/usr/app '
-            '-w /usr/app '
-            '-e DBT_PROFILES_DIR=/usr/app '
-            'ghcr.io/dbt-labs/dbt-postgres:1.9.latest run'
-        ),
+        bash_command=DBT_CMD + 'run',
     )
 
-    task1 >> task2
+    task3 = BashOperator(
+        task_id='validate_data_task',
+        bash_command=DBT_CMD + 'test',
+    )
+
+    task1 >> task2 >> task3

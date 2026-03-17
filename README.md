@@ -23,10 +23,11 @@ in a single deployable project.
 
 | Stage | Tool | What it does |
 |---|---|---|
-| **Extract** | Python + Weatherstack API | Fetches live weather data |
-| **Load** | PostgreSQL | Stores raw data |
-| **Transform** | dbt | Deduplicates, aggregates, and models the data |
-| **Orchestrate** | Apache Airflow | Schedules and automates every step on a 5-min cadence |
+| **Extract** | Python + Weatherstack API | Fetches live weather data every 5 min |
+| **Load** | PostgreSQL | Stores raw ingested data |
+| **Transform** | dbt | Null handling, deduplication, aggregation across 3 models |
+| **Validate** | dbt test | 26 data quality checks (not_null, unique, accepted_values) |
+| **Orchestrate** | Apache Airflow | Schedules and automates all steps on a 5-min cadence |
 | **Report** | Apache Superset | Live auto-refreshing dashboards |
 | **Infra** | Docker + Docker Compose | Single command to run everything |
 
@@ -58,22 +59,24 @@ weather-data-automated-etl-pipeline/
 ├── api_call/
 │   ├── request_call.py          # Calls the Weatherstack API
 │   ├── insert_records.py        # Inserts data into Postgres
-│   └── requirements.txt         # Python dependencies
+│   └── requirements.txt         # Python dependencies (psycopg2-binary, requests)
 │
 ├── airflow/
 │   └── dags/
-│       └── orchestrator.py      # Airflow DAG: ingest → transform (every 5 min)
+│       └── orchestrator.py      # Airflow DAG: ingest → transform → validate (every 5 min)
 │
 ├── dbt/
 │   ├── dbt_project.yml
 │   ├── profiles.yml             # Postgres connection for dbt
 │   └── models/
 │       ├── staging/
-│       │   ├── sources.yml
-│       │   └── stg_weather_data.sql   # Deduplicates raw data
+│       │   ├── sources.yml               # Source declarations + tests on raw table
+│       │   ├── schema.yml                # Column-level tests for stg_weather_data
+│       │   └── stg_weather_data.sql      # Null handling, dedup → staging table
 │       └── mart/
-│           ├── daily_average.sql             # Avg temp + wind per city/day
-│           └── weather_analytics_reports.sql # Reporting table
+│           ├── schema.yml                        # Column-level tests for mart models
+│           ├── daily_average.sql                 # Avg temp + wind per city/day
+│           └── weather_analytics_reports.sql     # Reporting table for Superset
 │
 ├── postgres/
 │   ├── airflow_init.sql         # Creates Airflow DB + user
@@ -208,13 +211,13 @@ docker exec airflow_container cat /opt/airflow/simple_auth_manager_passwords.jso
 
 ## ✅ Pipeline in Action
 
-### Airflow — DAG Running on Schedule
+### Airflow — 3-Task DAG Running on Schedule
 
 The `weather-api-dbt-orchestrator` DAG runs automatically every 5 minutes:
 
 ![Airflow DAG List](images/airflow_dag_success1.png)
 
-Both tasks completing successfully in each run:
+All three tasks completing successfully — ingest → transform → validate:
 
 ![Airflow DAG Tasks Success](images/airflow_dag_success2.png)
 
@@ -232,21 +235,61 @@ Weather metrics (avg temperature + wind speed) updating in real time:
 Weatherstack API
       │  every 5 min (Airflow schedules)
       ▼
-ingest_data_task  (PythonOperator)
-      │  insert_records.py
+① ingest_data_task  (PythonOperator)
+      │  insert_records.py → COALESCE nulls
       ▼
- dev.raw_weather_data  (Postgres)
+  dev.raw_weather_data  (Postgres)
       │
       ▼
-transform_data_task  (BashOperator → docker run dbt)
+② transform_data_task  (BashOperator → docker run dbt run)
       │
-      ├── dev.stg_weather_data          (deduplicated staging table)
+      │  stg_weather_data: nulls coalesced, deduplicated, data_quality_flag added
+      ├── dev.stg_weather_data
       ├── dev.daily_average             (avg temp + wind per city/day)
       └── dev.weather_analytics_reports (focused reporting columns)
-                    │
-                    ▼
-         Apache Superset Dashboard
-         (auto-refreshes every 5 min)
+      │
+      ▼
+③ validate_data_task  (BashOperator → docker run dbt test)
+      │  26 tests: not_null, unique, accepted_values
+      │  ✅ PASS=26 / WARN=0 / ERROR=0
+      ▼
+  Apache Superset Dashboard
+  (auto-refreshes every 5 min)
+```
+
+---
+
+## 🧪 Data Quality
+
+This pipeline enforces data quality at every layer:
+
+### Null & Missing Value Handling (in `stg_weather_data.sql`)
+
+| Column | Null Fix Applied |
+|---|---|
+| `city` | `COALESCE(NULLIF(TRIM(city), ''), 'Unknown')` |
+| `temperature` | `COALESCE(temperature, 0)` |
+| `wind_speed` | `COALESCE(wind_speed, 0)` |
+| `weather_descriptions` | `COALESCE(NULLIF(TRIM(...), ''), 'N/A')` |
+| `time` | `COALESCE(time::text, to_char(inserted_at, 'YYYY-MM-DD HH24:MI'))` |
+
+Every row gets a `data_quality_flag` column: `'clean'` or `'fixed: <field> null'` so you can monitor data quality trends in Superset.
+
+### dbt Tests (26 total — run automatically after every `dbt run`)
+
+| Layer | Tests |
+|---|---|
+| **Source** (`raw_weather_data`) | `not_null` on 6 columns, `unique` on `id` |
+| **Staging** (`stg_weather_data`) | `not_null` on all columns, `unique` on `id`, `accepted_values` on `data_quality_flag` |
+| **Mart** (`daily_average`, `weather_analytics_reports`) | `not_null` on all columns |
+
+```bash
+# Run tests manually
+docker run --rm --network data_project_my_network \
+  -v /path/to/dbt:/usr/app -w /usr/app \
+  -e DBT_PROFILES_DIR=/usr/app \
+  ghcr.io/dbt-labs/dbt-postgres:1.9.latest test
+# Expected: PASS=26 WARN=0 ERROR=0
 ```
 
 ---

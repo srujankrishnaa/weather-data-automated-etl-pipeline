@@ -8,18 +8,33 @@ sources:
         description: "Raw weather data inserted by the Airflow pipeline from Weatherstack API"
         columns:
           - name: id
-            description: "Primary key"
+            description: "Primary key — auto-generated serial"
+            tests:
+              - not_null
+              - unique
           - name: city
-            description: "City name"
+            description: "City name from Weatherstack"
+            tests:
+              - not_null
           - name: temperature
             description: "Temperature in Celsius"
+            tests:
+              - not_null
           - name: weather_descriptions
-            description: "Weather condition description"
+            description: "Weather condition description (e.g. Sunny, Cloudy)"
+            tests:
+              - not_null
           - name: wind_speed
-            description: "Wind speed"
+            description: "Wind speed in km/h"
+            tests:
+              - not_null
           - name: time
-            description: "Local time at location"
+            description: "Local time at the location when data was fetched"
+            tests:
+              - not_null
           - name: inserted_at
-            description: "Timestamp when row was inserted"
+            description: "UTC timestamp when the row was inserted by Airflow"
+            tests:
+              - not_null
           - name: utc_offset
-            description: "UTC offset of the location"
+            description: "UTC offset in hours for the location"

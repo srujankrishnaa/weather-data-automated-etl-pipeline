@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: daily_average
+    description: >
+      Daily aggregated average temperature and wind speed per city.
+      Sourced from stg_weather_data (already deduped and null-handled).
+    columns:
+      - name: city
+        description: "City name"
+        tests:
+          - not_null
+      - name: date
+        description: "Date of the aggregated readings"
+        tests:
+          - not_null
+      - name: avg_temperature
+        description: "Average temperature in Celsius for the day"
+        tests:
+          - not_null
+      - name: avg_wind_speed
+        description: "Average wind speed in km/h for the day"
+        tests:
+          - not_null
+
+  - name: weather_analytics_reports
+    description: >
+      Focused reporting table — key columns for Superset dashboards.
+    columns:
+      - name: city
+        description: "City name"
+        tests:
+          - not_null
+      - name: temperature
+        description: "Temperature reading"
+        tests:
+          - not_null
+      - name: weather_descriptions
+        description: "Weather condition description"
+        tests:
+          - not_null
+      - name: wind_speed
+        description: "Wind speed reading"
+        tests:
+          - not_null
+      - name: weather_local_time
+        description: "Local time of the weather observation"
+        tests:
+          - not_null

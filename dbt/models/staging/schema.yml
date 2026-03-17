@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_weather_data
+    description: >
+      Deduplicated and cleaned staging table from raw_weather_data.
+      Nulls are coalesced to safe defaults, and a data_quality_flag column
+      marks every row as 'clean' or describes what was fixed.
+    columns:
+      - name: id
+        description: "Primary key from raw source"
+        tests:
+          - not_null
+          - unique
+      - name: city
+        description: "City name — coalesced to 'Unknown' if null or blank"
+        tests:
+          - not_null
+      - name: temperature
+        description: "Temperature in Celsius — coalesced to 0 if null"
+        tests:
+          - not_null
+      - name: weather_descriptions
+        description: "Weather condition — coalesced to 'N/A' if null or blank"
+        tests:
+          - not_null
+      - name: wind_speed
+        description: "Wind speed in km/h — coalesced to 0 if null"
+        tests:
+          - not_null
+      - name: weather_local_time
+        description: "Local time at the location — coalesced to inserted_at if null"
+        tests:
+          - not_null
+      - name: inserted_at_local
+        description: "Inserted_at adjusted to local timezone via utc_offset"
+      - name: data_quality_flag
+        description: "Row quality status: 'clean' or describes which field had a null fixed"
+        tests:
+          - not_null
+          - accepted_values:
+              values:
+                - 'clean'
+                - 'fixed: city null'
+                - 'fixed: temperature null'
+                - 'fixed: wind_speed null'
+                - 'fixed: time null'
