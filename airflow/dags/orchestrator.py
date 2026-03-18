@@ -28,9 +28,9 @@ DBT_CMD = (
 dag = DAG(
     dag_id='weather-api-dbt-orchestrator',
     default_args=default_args,
-    description='Ingest weather data, transform with dbt, validate data quality',
+    description='Ingest NOAA ISD weather data from S3, transform with dbt, validate data quality',
     start_date=datetime(2024, 4, 30),
-    schedule=timedelta(minutes=5),
+    schedule=timedelta(hours=1),
     catchup=False,
     is_paused_upon_creation=False,
 )

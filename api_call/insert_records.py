@@ -1,6 +1,6 @@
 import psycopg2
 import os
-from request_call import mock_data, fetch_data
+from s3_fetch import fetch_data
 
 DB_HOST = os.environ.get("DB_HOST", "localhost")
 DB_PORT = int(os.environ.get("DB_PORT", 5000))
@@ -76,20 +76,27 @@ def insert_records(conn, data):
         raise
 
 def main():
-
+    conn = None
     try:
-
-        #data = mock_data()
-        data = fetch_data()
         conn = connect_to_db()
         create_table(conn)
-        insert_records(conn, data)
+
+        # s3_fetch.fetch_data() returns a list — one dict per station
+        data_list = fetch_data()
+        if not data_list:
+            print("No data returned from NOAA S3 — skipping insert.")
+            return
+
+        for data in data_list:
+            try:
+                insert_records(conn, data)
+            except Exception as e:
+                print(f"Error inserting {data['location']['name']}: {e}")
+                conn.rollback()   # keep connection alive for next station
+
     except Exception as e:
-        print(f"error occured during execution: {e}")
+        print(f"Fatal error during execution: {e}")
     finally:
-        if conn in locals():
+        if conn:
             conn.close()
             print("Database connection closed.")
-
-#if __name__ == "__main__":
-    #main()  
