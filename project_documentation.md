@@ -19,24 +19,31 @@
 ## 1. Overview
 
 An end-to-end, fully automated data pipeline that:
-- Fetches live weather data from the **Weatherstack API** every 5 minutes
-- Inserts raw data into **PostgreSQL**
-- Transforms and models it using **dbt** (staging → mart layer)
-- Orchestrates every step automatically with **Apache Airflow 3.0**
+- Reads hourly weather observations from the **NOAA ISD public dataset on AWS S3** (no API key required)
+- Inserts raw data into **PostgreSQL** with a dedup guard
+- Transforms and models it using **dbt** (staging → mart layer, with null handling)
+- Validates data quality with **26 dbt tests** after every run
+- Orchestrates every step automatically with **Apache Airflow 3.0** on an hourly schedule
 - Visualises it with **Apache Superset** auto-refreshing dashboards
 
 Everything runs in Docker containers, spun up with a single `docker-compose up` command.
 
 **Data Flow:**
 ```
-Weatherstack API
-    │  (every 5 min, triggered by Airflow)
+NOAA ISD — AWS Public S3
+(s3://noaa-isd-pds/data/YEAR/STATION-YEAR.gz)
+    │  every hour (Airflow schedules)
     ▼
-① ingest_data_task  →  dev.raw_weather_data  (Postgres)
+① ingest_data_task  (PythonOperator)
+    │  s3_fetch.py → boto3 anonymous S3 read
+    │  ISD fixed-width parse → sentinel validation → dedup guard
+    ▼
+  dev.raw_weather_data  (Postgres)
+  [New York JFK + New York Central Park]
     │
     ▼
 ② transform_data_task (dbt run)
-    │  Null coalescing + deduplication + data_quality_flag
+    │  Null coalescing + dedup + data_quality_flag
     ├──  dev.stg_weather_data          (cleaned + deduplicated)
     ├──  dev.daily_average             (aggregated per city/day)
     └──  dev.weather_analytics_reports (reporting layer)
@@ -47,14 +54,15 @@ Weatherstack API
     │  ✅ PASS=26 / WARN=0 / ERROR=0
     ▼
   Apache Superset Dashboard
-  (auto-refresh every 5 min)
+  (auto-refresh every hour)
 ```
 
 **Tech Stack:**
 
 | Tool | Version | Purpose |
 |---|---|---|
-| Python | 3.x | API ingestion scripts |
+| Python | 3.x | Data ingestion scripts |
+| boto3 | latest | Anonymous S3 access (NOAA public bucket, no credentials) |
 | Apache Airflow | 3.0.0 | Pipeline orchestration |
 | dbt-postgres | 1.9.latest | Data transformation |
 | PostgreSQL | 14.17 | Data warehouse |
@@ -178,37 +186,52 @@ api_key = "YOUR_WEATHERSTACK_API_KEY"
 
 ---
 
-## 5. Understanding the API & Testing It
+## 5. Understanding the Data Source
 
-### What the API returns
+### What is NOAA ISD?
 
-The Weatherstack API returns a JSON object for a given city. Example response fields used:
+NOAA ISD (Integrated Surface Database) is a global archive of hourly surface weather observations maintained by the US National Oceanic and Atmospheric Administration. It's available as a **free public dataset on AWS S3** — no account or API key needed.
 
-```json
-{
-  "location": { "name": "New York", "localtime": "2026-03-16 14:00" },
-  "current": {
-    "temperature": 12,
-    "weather_descriptions": ["Partly cloudy"],
-    "wind_speed": 20,
-    "humidity": 65
-  }
-}
+```
+S3 bucket:  s3://noaa-isd-pds/
+Path:       data/YEAR/USAF-WBAN-YEAR.gz
+Example:    data/2025/744860-94789-2025.gz  ← JFK Airport 2025
 ```
 
-### Test the API locally
+Each file is a gzip-compressed fixed-width text file with one row per observation (roughly hourly).
+
+### Stations used in this pipeline
+
+| Station | USAF | WBAN | S3 Key |
+|---|---|---|---|
+| New York JFK Airport | 744860 | 94789 | `744860-94789` |
+| New York Central Park | 725053 | 94728 | `725053-94728` |
+
+### Key ISD Fixed-Width Field Positions (0-indexed)
+
+| Field | Bytes | Format | Example | Decoded |
+|---|---|---|---|---|
+| Date | 15–22 | YYYYMMDD | `20250827` | Aug 27, 2025 |
+| Time | 23–26 | HHMM UTC | `0351` | 03:51 UTC |
+| Wind speed | 65–68 | tenths of m/s | `0041` | 4.1 m/s = 14.8 km/h |
+| Temperature | 87–91 | signed tenths of °C | `+0206` | 20.6°C |
+
+### Sentinel values (missing data indicators)
+
+NOAA uses magic numbers for missing data — **these must be rejected before inserting**:
+- Temperature `>= 9999` → skip row
+- Wind speed `>= 9999` → skip row
+
+`s3_fetch.py` handles all of this automatically.
+
+### Test the data source manually
 
 ```bash
-# Activate virtual env (if running outside Docker)
-cd api_call
-python -c "from request_call import fetch_data; print(fetch_data())"
-```
+# Stream the JFK 2025 file and show first 3 lines
+curl -s "https://noaa-isd-pds.s3.amazonaws.com/data/2025/744860-94789-2025.gz" | gunzip | head -3
 
-### Test inserting into Postgres
-
-```bash
-# With Docker running:
-docker exec airflow_container python /opt/airflow/api_call/insert_records.py
+# Run the standalone fetch script inside the Airflow container
+docker exec airflow_container python /opt/airflow/api_call/s3_fetch.py
 ```
 
 ---
@@ -294,13 +317,15 @@ File: `airflow/dags/orchestrator.py`
 The DAG has **three tasks** chained sequentially (`task1 >> task2 >> task3`):
 
 1. **`ingest_data_task`** (`PythonOperator`)
-   - Lazily imports `insert_records.main()` inside the callable (avoids parse-time imports)
-   - Calls Weatherstack API, inserts one row into `dev.raw_weather_data`
-   - Runs in ~3–5 seconds
+   - Calls `insert_records.main()` which imports `s3_fetch.fetch_data()`
+   - `s3_fetch` connects to `s3://noaa-isd-pds/` anonymously via boto3
+   - Tries current year first, falls back to prior year if not yet published
+   - Parses ISD fixed-width format, validates sentinels, converts units
+   - Dedup guard prevents re-inserting the same station + hour
+   - Runs in ~20–40 seconds (streams ~10 MB file per station)
 
 2. **`transform_data_task`** (`BashOperator`)
    - Runs `docker run ... ghcr.io/dbt-labs/dbt-postgres:1.9.latest run`
-   - Mounts the local `./dbt` directory into the container
    - Applies null coalescing, deduplication, and builds all 3 dbt models
    - Runs in ~10–15 seconds
 
@@ -310,7 +335,7 @@ The DAG has **three tasks** chained sequentially (`task1 >> task2 >> task3`):
    - Fails the DAG run visibly if any data quality check fails
    - Runs in ~3–5 seconds
 
-Schedule: every **5 minutes** (`schedule=timedelta(minutes=5)`)
+Schedule: every **1 hour** (`schedule=timedelta(hours=1)`)
 
 ### Monitoring in the UI
 

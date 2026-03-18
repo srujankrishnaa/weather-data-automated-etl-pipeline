@@ -32,6 +32,8 @@ services:
       AIRFLOW__CORE__DAG_FILE_PROCESSOR_TIMEOUT: 600
       AIRFLOW__DAG_PROCESSOR__PROCESSOR_TIMEOUT: 600
       AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: 600
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 600
+      AIRFLOW__CORE__MIN_SERIALIZED_DAG_UPDATE_INTERVAL: 600
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./api_call:/opt/airflow/api_call

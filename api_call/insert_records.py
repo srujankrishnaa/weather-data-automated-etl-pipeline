@@ -46,34 +46,41 @@ def create_table(conn):
         
 
 def insert_records(conn, data):
-    print("Inserting weather data into the database...")
-    try:
-        weather = data['current']
-        location = data['location']
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO dev.raw_weather_data (
-                city,
-                temperature,
-                weather_descriptions,
-                wind_speed,
-                time,
-                inserted_at,
-                utc_offset
-            ) VALUES (%s, %s, %s, %s, %s, NOW(), %s)
-        """, (
-            location['name'],
-            weather['temperature'],
-            weather['weather_descriptions'][0],
-            weather['wind_speed'],
-            location['localtime'],
-            location['utc_offset']
-        ))
-        conn.commit()
-        print("Data successfully inserted")
-    except psycopg2.Error as e:
-        print(f"Error inserting data into the database: {e}")
-        raise
+    weather  = data['current']
+    location = data['location']
+    cursor   = conn.cursor()
+
+    # Dedup guard — skip if this exact station + time already ingested
+    cursor.execute("""
+        SELECT 1 FROM dev.raw_weather_data
+        WHERE city = %s AND time = %s
+    """, (location['name'], location['localtime']))
+
+    if cursor.fetchone():
+        print(f"Already ingested {location['name']} at {location['localtime']} — skipping.")
+        return
+
+    cursor.execute("""
+        INSERT INTO dev.raw_weather_data (
+            city,
+            temperature,
+            weather_descriptions,
+            wind_speed,
+            time,
+            inserted_at,
+            utc_offset
+        ) VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+    """, (
+        location['name'],
+        weather['temperature'],
+        weather['weather_descriptions'][0],
+        weather['wind_speed'],
+        location['localtime'],
+        location['utc_offset']
+    ))
+    conn.commit()
+    print(f"Inserted {location['name']} at {location['localtime']}")
+
 
 def main():
     conn = None

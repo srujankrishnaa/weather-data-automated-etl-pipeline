@@ -1,10 +1,10 @@
 # 🌦️ Automated Weather Data ETL Pipeline
 
-An end-to-end, Containerized data pipeline that simulates real-time ingestion of weather data at 5-minute intervals using 
-Apache Airflow scheduling, loads it into PostgreSQL, transforms and models data using dbt and visualises it via Apache Superset dashboards.
+An end-to-end, containerised data pipeline that ingests real weather observations from **NOAA ISD public data on AWS S3** every hour using
+Apache Airflow scheduling, loads them into PostgreSQL, transforms and models the data using dbt, and visualises it via Apache Superset dashboards.
 
-Built to demonstrate real-world data engineering practices including 
-pipeline orchestration, data modelling, containerisation, and BI reporting 
+Built to demonstrate real-world data engineering practices including
+S3 object storage reading (anonymous boto3), pipeline orchestration, data modelling, containerisation, and BI reporting
 in a single deployable project.
 
 ![Python](https://img.shields.io/badge/Python-3.x-blue?logo=python&logoColor=white)
@@ -23,11 +23,11 @@ in a single deployable project.
 
 | Stage | Tool | What it does |
 |---|---|---|
-| **Extract** | Python + Weatherstack API | Fetches live weather data every 5 min |
+| **Extract** | Python + NOAA ISD (AWS S3) | Reads hourly weather observations from public S3 bucket via boto3 |
 | **Load** | PostgreSQL | Stores raw ingested data |
 | **Transform** | dbt | Null handling, deduplication, aggregation across 3 models |
 | **Validate** | dbt test | 26 data quality checks (not_null, unique, accepted_values) |
-| **Orchestrate** | Apache Airflow | Schedules and automates all steps on a 5-min cadence |
+| **Orchestrate** | Apache Airflow | Schedules and automates all steps hourly |
 | **Report** | Apache Superset | Live auto-refreshing dashboards |
 | **Infra** | Docker + Docker Compose | Single command to run everything |
 
@@ -38,6 +38,7 @@ in a single deployable project.
 | Tool | Version | Role |
 |---|---|---|
 | Python | 3.x | Data ingestion scripts |
+| boto3 | latest | Anonymous S3 access (NOAA public bucket) |
 | Apache Airflow | 3.0.0 | Pipeline orchestration |
 | dbt-postgres | 1.9.latest | Data transformation & modelling |
 | PostgreSQL | 14.17 | Data warehouse |
@@ -57,13 +58,13 @@ weather-data-automated-etl-pipeline/
 ├── images/                      # Screenshots used in this README
 │
 ├── api_call/
-│   ├── request_call.py          # Calls the Weatherstack API
-│   ├── insert_records.py        # Inserts data into Postgres
-│   └── requirements.txt         # Python dependencies (psycopg2-binary, requests)
+│   ├── s3_fetch.py              # Reads NOAA ISD data from AWS S3 (anonymous boto3)
+│   ├── insert_records.py        # Inserts data into Postgres (with dedup guard)
+│   └── requirements.txt         # Python dependencies (psycopg2-binary, boto3)
 │
 ├── airflow/
 │   └── dags/
-│       └── orchestrator.py      # Airflow DAG: ingest → transform → validate (every 5 min)
+│       └── orchestrator.py      # Airflow DAG: ingest → transform → validate (every 1 hour)
 │
 ├── dbt/
 │   ├── dbt_project.yml
@@ -101,7 +102,7 @@ weather-data-automated-etl-pipeline/
 | **RAM** | 8 GB minimum — 12 GB+ recommended |
 | **Docker Desktop** | Version 4.x+ with WSL2 backend enabled |
 | **Git** | For cloning the repository |
-| **Weatherstack API Key** | Free tier at [weatherstack.com](https://weatherstack.com) (100 calls/month) |
+| **API Key** | ❌ None required — NOAA ISD S3 is a free public dataset |
 | **Disk Space** | ~4 GB for Docker images |
 
 ---
@@ -153,10 +154,7 @@ cp docker/.env.example docker/.env
 
 Open `docker/.env` and set a unique `SUPERSET_SECRET_KEY`.
 
-Then open `api_call/request_call.py` and add your **Weatherstack API key**:
-```python
-API_KEY = "your_api_key_here"
-```
+> ✅ **No API key needed** — this pipeline reads from the public NOAA ISD S3 bucket (`s3://noaa-isd-pds/`) using anonymous access. No account or credentials required.
 
 ---
 
@@ -213,7 +211,7 @@ docker exec airflow_container cat /opt/airflow/simple_auth_manager_passwords.jso
 
 ### Airflow — 3-Task DAG Running on Schedule
 
-The `weather-api-dbt-orchestrator` DAG runs automatically every 5 minutes:
+The `weather-api-dbt-orchestrator` DAG runs automatically every hour:
 
 ![Airflow DAG List](images/airflow_dag_success1.png)
 
@@ -232,13 +230,16 @@ Weather metrics (avg temperature + wind speed) updating in real time:
 ## 🔄 Data Flow
 
 ```
-Weatherstack API
-      │  every 5 min (Airflow schedules)
+NOAA ISD — AWS Public S3
+(s3://noaa-isd-pds/data/YEAR/STATION-YEAR.gz)
+      │  every hour (Airflow schedules)
       ▼
 ① ingest_data_task  (PythonOperator)
-      │  insert_records.py → COALESCE nulls
+      │  s3_fetch.py → boto3 anonymous S3 read
+      │  ISD fixed-width parse → sentinel validation → dedup guard
       ▼
   dev.raw_weather_data  (Postgres)
+  [New York JFK + New York Central Park]
       │
       ▼
 ② transform_data_task  (BashOperator → docker run dbt run)
@@ -254,7 +255,7 @@ Weatherstack API
       │  ✅ PASS=26 / WARN=0 / ERROR=0
       ▼
   Apache Superset Dashboard
-  (auto-refreshes every 5 min)
+  (auto-refreshes every hour)
 ```
 
 ---
